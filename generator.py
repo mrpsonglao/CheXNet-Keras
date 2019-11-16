@@ -13,7 +13,7 @@ class AugmentedImageSequence(Sequence):
     For more information of imgaug see: https://github.com/aleju/imgaug
     """
 
-    def __init__(self, dataset_csv_file, class_names, source_image_dir, batch_size=16,
+    def __init__(self, dataset_csv_file, class_names, source_image_dir, sample_size, batch_size=16,
                  target_size=(224, 224), augmenter=None, verbose=0, steps=None,
                  shuffle_on_epoch_end=True, random_state=1):
         """
@@ -27,6 +27,7 @@ class AugmentedImageSequence(Sequence):
         """
         self.dataset_df = pd.read_csv(dataset_csv_file)
         self.source_image_dir = source_image_dir
+        self.sample_size = sample_size
         self.batch_size = batch_size
         self.target_size = target_size
         self.augmenter = augmenter
@@ -82,7 +83,8 @@ class AugmentedImageSequence(Sequence):
         return self.y[:self.steps*self.batch_size, :]
 
     def prepare_dataset(self):
-        df = self.dataset_df.sample(frac=1., random_state=self.random_state)
+        # df = self.dataset_df.sample(frac=1., random_state=self.random_state)
+        df = self.dataset_df.sample(frac=self.sample_size, random_state=self.random_state)
         self.x_path, self.y = df["Image Index"].as_matrix(), df[self.class_names].as_matrix()
 
     def on_epoch_end(self):

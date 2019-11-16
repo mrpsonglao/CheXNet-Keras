@@ -6,7 +6,7 @@ from callback import MultipleClassAUROC, MultiGPUModelCheckpoint
 from configparser import ConfigParser
 from generator import AugmentedImageSequence
 from keras.callbacks import ModelCheckpoint, TensorBoard, ReduceLROnPlateau
-from keras.optimizers import Adam
+from keras.optimizers import Adam, SGD
 from keras.utils import multi_gpu_model
 from models.keras import ModelFactory
 from utility import get_sample_counts
@@ -24,6 +24,7 @@ def main():
     output_dir = cp["DEFAULT"].get("output_dir")
     image_source_dir = cp["DEFAULT"].get("image_source_dir")
     base_model_name = cp["DEFAULT"].get("base_model_name")
+    sample_size = cp["DEFAULT"].getfloat("sample_size")
     class_names = cp["DEFAULT"].get("class_names").split(",")
 
     # train config
@@ -84,7 +85,7 @@ def main():
 
         # compute steps
         if train_steps == "auto":
-            train_steps = int(train_counts / batch_size)
+            train_steps = int(train_counts*sample_size / batch_size)
         else:
             try:
                 train_steps = int(train_steps)
@@ -96,7 +97,7 @@ def main():
         print(f"** train_steps: {train_steps} **")
 
         if validation_steps == "auto":
-            validation_steps = int(dev_counts / batch_size)
+            validation_steps = int(dev_counts*sample_size / batch_size)
         else:
             try:
                 validation_steps = int(validation_steps)
@@ -142,6 +143,7 @@ def main():
             dataset_csv_file=os.path.join(output_dir, "train.csv"),
             class_names=class_names,
             source_image_dir=image_source_dir,
+            sample_size=sample_size,
             batch_size=batch_size,
             target_size=(image_dimension, image_dimension),
             augmenter=augmenter,
@@ -151,6 +153,7 @@ def main():
             dataset_csv_file=os.path.join(output_dir, "dev.csv"),
             class_names=class_names,
             source_image_dir=image_source_dir,
+            sample_size=sample_size,
             batch_size=batch_size,
             target_size=(image_dimension, image_dimension),
             augmenter=augmenter,
@@ -181,7 +184,12 @@ def main():
             )
 
         print("** compile model with class weights **")
-        optimizer = Adam(lr=initial_learning_rate)
+        if base_model_name == "DenseNet121":
+            optimizer = Adam(lr=initial_learning_rate)
+        elif base_model_name == "ResNet50":
+            # use Nesterov for faster convergence
+            # optimizer = SGD(lr=0.01, momentum=0.9, nesterov=True)
+            optimizer = SGD(lr=initial_learning_rate)
         model_train.compile(optimizer=optimizer, loss="binary_crossentropy")
         auroc = MultipleClassAUROC(
             sequence=validation_sequence,
@@ -190,13 +198,21 @@ def main():
             stats=training_stats,
             workers=generator_workers,
         )
-        callbacks = [
-            checkpoint,
-            TensorBoard(log_dir=os.path.join(output_dir, "logs"), batch_size=batch_size),
-            ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=patience_reduce_lr,
-                              verbose=1, mode="min", min_lr=min_lr),
-            auroc,
-        ]
+        if base_model_name == "DenseNet121":
+            callbacks = [
+                checkpoint,
+                TensorBoard(log_dir=os.path.join(output_dir, "logs"), batch_size=batch_size),
+                ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=patience_reduce_lr,
+                                verbose=1, mode="min", min_lr=min_lr),
+                auroc,
+            ]
+        elif base_model_name == "ResNet50":
+            # remove ReduceLROnPlateau
+            callbacks = [
+                checkpoint,
+                TensorBoard(log_dir=os.path.join(output_dir, "logs"), batch_size=batch_size),
+                auroc,
+            ]
 
         print("** start training **")
         history = model_train.fit_generator(

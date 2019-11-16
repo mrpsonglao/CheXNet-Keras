@@ -2,6 +2,7 @@ import importlib
 from keras.layers import Input
 from keras.layers.core import Dense
 from keras.models import Model
+from keras import backend as K
 
 
 class ModelFactory:
@@ -76,16 +77,21 @@ class ModelFactory:
         if input_shape is None:
             input_shape = self.models_[model_name]["input_shape"]
 
-        img_input = Input(shape=input_shape)
-
-        base_model = base_model_class(
-            include_top=False,
-            input_tensor=img_input,
-            input_shape=input_shape,
-            weights=base_weights,
-            pooling="avg")
-        x = base_model.output
-        predictions = Dense(len(class_names), activation="sigmoid", name="predictions")(x)
+        with K.name_scope("input"):
+            img_input = Input(shape=input_shape)
+        
+        with K.name_scope(model_name):
+            base_model = base_model_class(
+                include_top=False,
+                input_tensor=img_input,
+                input_shape=input_shape,
+                weights=base_weights,
+                pooling="avg")
+            x = base_model.output
+        
+        with K.name_scope("prediction"):
+            predictions = Dense(len(class_names), activation="sigmoid", name="predictions")(x)
+        
         model = Model(inputs=img_input, outputs=predictions)
 
         if weights_path == "":

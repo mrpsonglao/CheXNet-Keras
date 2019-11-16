@@ -15,7 +15,7 @@ def get_output_layer(model, layer_name):
     return layer
 
 
-def create_cam(df_g, output_dir, image_source_dir, model, generator, class_names):
+def create_cam(df_g, output_dir, image_source_dir, model, generator, class_names, last_conv_layer):
     """
     Create a CAM overlay image for the input image
 
@@ -44,7 +44,7 @@ def create_cam(df_g, output_dir, image_source_dir, model, generator, class_names
     # CAM overlay
     # Get the 512 input weights to the softmax.
     class_weights = model.layers[-1].get_weights()[0]
-    final_conv_layer = get_output_layer(model, "bn")
+    final_conv_layer = get_output_layer(model, last_conv_layer)
     get_output = kb.function([model.layers[0].input], [final_conv_layer.output, model.layers[-1].output])
     [conv_outputs, predictions] = get_output([np.array([img_transformed])])
     conv_outputs = conv_outputs[0, :, :, :]
@@ -94,6 +94,8 @@ def main():
     # CAM config
     bbox_list_file = cp["CAM"].get("bbox_list_file")
     use_best_weights = cp["CAM"].getboolean("use_best_weights")
+    cam_sample_num = cp["CAM"].getint("cam_sample_num")
+    focus_on = cp["CAM"].get("focus_on")
 
     print("** load model **")
     if use_best_weights:
@@ -109,15 +111,21 @@ def main():
         use_base_weights=False,
         weights_path=model_weights_path)
 
+    last_conv_layer = model_factory.get_last_conv_layer(base_model_name)
+
     print("read bbox list file")
     df_images = pd.read_csv(bbox_list_file, header=None, skiprows=1)
     df_images.columns = ["file_name", "label", "x", "y", "w", "h"]
+
+    # focus only on a specific problem and get only the first few samples
+    df_images = df_images[df_images["label"] == focus_on].head(cam_sample_num)
 
     print("create a generator for loading transformed images")
     cam_sequence = AugmentedImageSequence(
         dataset_csv_file=os.path.join(output_dir, "test.csv"),
         class_names=class_names,
         source_image_dir=image_source_dir,
+        sample_size=1.,
         batch_size=1,
         target_size=(image_dimension, image_dimension),
         augmenter=None,
@@ -138,6 +146,7 @@ def main():
             model=model,
             generator=cam_sequence,
             class_names=class_names,
+            last_conv_layer=last_conv_layer
         ),
         axis=1,
     )
